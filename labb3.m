@@ -9,7 +9,10 @@ b = 1;
 Ktau = 38;
 Km = 1/2;
 n = 1/20;
+
+
 %% upg 1 - hitta G(s)
+
 P = Lm*J*s^3 + (Lm*b+Rm*J)*s^2 + (Rm*b+Km*Ktau)*s;
 Q = n*Ktau;
 
@@ -50,7 +53,7 @@ Gc = Go/(1+Go);
 step(Gc)
 grid on
 
-%% upg2 - plotta nyquist
+%% upg2 - plotta nyquistkurvan
 
 nyquist(Go)
 grid on
@@ -59,23 +62,45 @@ grid on
 
 [Gm, Pm, Wcg, Wcp] = margin(Go);
 
-wb = bandwidth(Gc);
+bw = bandwidth(Gc);      % 3 dB-bandbredd
 
 disp("cross-over frequncy")
 Wcg
 disp("phase margin")
 Pm
 disp("bandwith")
-wb
+bw
 
+% använde mig av fprintf för att få snyggare utsktift
+fprintf('PM = %.2f deg vid ωc = %.4g rad/s\n', Pm, Wcp);
+fprintf('Sluten slinga bandbredd ≈ %.4g rad/s\n', bw);
 
 bode(Go);
 grid on
 
 %% upg4 - bara frågor i latex
 
+% Delfråga 4
+% GM is the factor by which you can multiply the current loop gain (which is 1) before instability.
+
+[GM, PM, wcg, wcp] = margin(G);
+Kcrit = GM;               % absolute critical K
+fprintf('GM = %.4g, so Kcrit = %.4g\n', GM, Kcrit);
+
+% We do a sanity check via the -180° crossing:
+[mag,phase] = bode(G, wcg);           
+Kcrit2 = 1/(abs(mag));   %  1/|G(jw_180)|
+fprintf('Kcrit (from |G| at omega_180) ≈ %.4f\n', Kcrit2);
+
+
 
 %% upg5 - bara frågor i latex
+
+
+
+
+
+
 
 %% upg 6 - Designa lead-lag trans func F(s) som uppfyller nedan krav:
 % 1) Overshoot <5%
@@ -91,15 +116,15 @@ grid on
 
 % Svara med motivering av val för Td, Ti, beta och gamma.
 
-%hint: 
+% hint: 
 % a) starta med att fixa controller som löser 1-3
 % b) anpassa denna till 4
 
 %%
 
-% a) krav 2 - p-reg f= k ger snabbhet
-Tr_target = minRT/4;
+% a) krav 2 - p-reg f = k ger snabbhet
 
+Tr_target = minRT/4;
 wc_target = 0.68*1.8/Tr_target;
 
 G_wc = evalfr(G, 1i*wc_target);  
@@ -194,12 +219,9 @@ Kv_0 = dcgain(GoFlead)
 %%
 
 
-
-
-
 Ti = 10/Wcg_GoFlead;
-gamma = ;
-evGolead= 1/GoFlead*s
+%gamma = ;
+evGolead = 1/GoFlead*s
 adj_e1 = evalfr(evGolead, 0)
 
 Flag = (Ti*s + 1)/(Ti*s + gamma);
@@ -231,6 +253,96 @@ max(abs(rampDeltaleadlag))
 figure
 plot(t,rampDeltaleadlag)
 
+
+%% Uppgift 12
+% Variabler
+J   = 4;
+Lm  = 2;
+Rm  = 21;
+b   = 1;
+Ktau= 38;
+Km  = 0.5;
+n   = 1/20;
+
+A = [ 0,    n,      0;
+      0,  -b/J,  Ktau/J;
+      0, -Km/Lm, -Rm/Lm ];
+
+B = [0;0; 1/Lm];
+C = [1 0 0];  
+D = 0;
+
+% Pol placement 
+zeta = 0.74; 
+wn = 0.9;
+p1 = -zeta*wn + 1i*wn*sqrt(1-zeta^2);
+p2 = conj(p1);
+p3 = -8*wn;
+L = place(A,B,[p1 p2 p3]);
+
+% Feedforward L0 för enhets DC-förstärkning r->y
+Acl = A - B*L;
+Gdc = -C*(Acl\B); 
+L0  = 1/Gdc;
+
+
+sys_cl = ss(Acl, B*L0, C, 0);
+info = stepinfo(sys_cl);
+
+% Uniform time grid 
+Tend = max(30, 10*info.RiseTime);     
+N    = 4000;                       % Num of points     
+t    = linspace(0, Tend, N).';         
+
+% Unit step reference  
+r = ones(N,1);
+[y, ~] = step(sys_cl, t); 
+
+x0 = zeros(size(A,1),1);
+[~, ~, x] = lsim(sys_cl, r, t, x0);    
+
+u = -(x * L.') + L0*r;
+
+
+Pdes = [p1 p2 p3];
+fprintf('Desired poles:\n'); disp(Pdes.');
+
+% Closed-loop performance
+info = stepinfo(sys_cl);
+fprintf('Rise time  = %.4g s\n', info.RiseTime);
+fprintf('Overshoot  = %.2f %%\n', info.Overshoot);
+
+
+umax = 110;                        
+umax_meas = max(abs(u));
+fprintf('max|u(t)|  = %.3f (limit %g) -> %s\n', umax_meas, umax, ...
+        tern(umax_meas<=umax,'PASS','FAIL'));
+
+disp('State feedback L ='); 
+disp(L);
+disp('Feedforward  L0 ='); 
+disp(L0);
+
+
+function out = tern(c,a,b) 
+    if c, out=a; 
+    else, out=b; 
+    end 
+end
+
+fprintf('max|u(t)| = %.2f\n', max(abs(u)));
+
+
+figure; 
+plot(t,y, t,r,'--'); 
+grid on; 
+legend('y','r'); 
+title('Closed-loop step (uniform t)');
+
+figure;
+plot(t,u); 
+grid on; 
+title('Control signal u(t)');
 
 
 
